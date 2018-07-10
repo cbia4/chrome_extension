@@ -3,7 +3,7 @@ function getJIRAFeed(callback, errorCallback){
     if(user == undefined) return;
     
     var url = "https://jira.secondlife.com/activity?maxResults=50&streams=user+IS+"+user+"&providers=issues";
-    make_request(url, "").then(function(response) {
+    makeRequest(url, "").then(function(response) {
       // empty response type allows the request.responseXML property to be returned in the makeRequest call
       callback(url, response);
     }, errorCallback);
@@ -16,14 +16,14 @@ function getJIRAFeed(callback, errorCallback){
  */
 async function getQueryResults(s, callback, errorCallback) {                                                 
     try {
-      var response = await make_request(s, "json");
+      var response = await makeRequest(s, "json");
       callback(createHTMLElementResult(response));
     } catch (error) {
       errorCallback(error);
     }
 }
 
-function make_request(url, responseType) {
+function makeRequest(url, responseType) {
   return new Promise(function(resolve, reject) {
     var req = new XMLHttpRequest();
     req.open('GET', url);
@@ -91,9 +91,9 @@ function domify(str){
   return dom.body.textContent;
 }
 
-function checkProjectExists(){
+async function checkProjectExists(){
     try {
-      return await make_request("https://jira.secondlife.com/rest/api/2/project/SUN", "json");
+      return await makeRequest("https://jira.secondlife.com/rest/api/2/project/SUN", "json");
     } catch (errorMessage) {
       document.getElementById('status').innerHTML = 'ERROR. ' + errorMessage;
       document.getElementById('status').hidden = false;
