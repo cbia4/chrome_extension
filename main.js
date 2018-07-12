@@ -1,12 +1,16 @@
 function getJIRAFeed(callback, errorCallback){
-    var user = document.getElementById("user").value;
-    if(user == undefined) return;
-    
-    var url = "https://jira.secondlife.com/activity?maxResults=50&streams=user+IS+" + user + "&providers=issues";
-    makeRequest(url, "").then(function(response) {
-      // empty response type allows the request.responseXML property to be returned in the makeRequest call
-      callback(url, response);
-    }, errorCallback);
+  var user = document.getElementById("user").value;
+  if(user == undefined || user.length < 1) {
+    setStatus('ERROR. Please Enter a User');
+    return;
+  }
+
+  var url = "https://jira.secondlife.com/activity?maxResults=50&streams=user+IS+" + user + "&providers=issues";
+  makeRequest(url, "").then(function(response) {
+    callback(url, response);
+  }).catch(function(errorMessage) {
+    errorCallback(errorMessage);
+  });
 }
 
 /**
@@ -15,13 +19,20 @@ function getJIRAFeed(callback, errorCallback){
  *   formatted for rendering.
  * @param {function(string)} errorCallback - Called when the query or call fails.
  */
-async function getQueryResults(searchTerm, callback, errorCallback) {                                                 
-    try {
-      var response = await makeRequest(searchTerm, "json");
-      callback(createHTMLElementResult(response));
-    } catch (error) {
-      errorCallback(error);
-    }
+function getQueryResults(searchTerm, callback, errorCallback) {    
+    makeRequest(searchTerm, "json").then(function(response) {
+        callback(response);
+    }).catch(function(errorMessage) {
+        errorCallback(errorMessage);
+    });                                             
+}
+
+async function checkProjectExists() {
+  try {
+    return await makeRequest("https://jira.secondlife.com/rest/api/2/project/SUN", "json");
+  } catch(errorMessage) {
+    setStatus('ERROR. ' + errorMessage);
+  }
 }
 
 function makeRequest(url, responseType) {
@@ -32,7 +43,7 @@ function makeRequest(url, responseType) {
 
     req.onload = function() {
       var response = responseType ? req.response : req.responseXML; 
-      if(response && response.errorMessages && response.errorMessages.length > 0){
+      if(response && response.errorMessages && response.errorMessages.length > 0) {
         reject(response.errorMessages[0]);
         return;
       }
@@ -65,45 +76,41 @@ function loadOptions() {
   });
 }
 
-function buildJQL(callback) {
-  var callbackBase = "https://jira.secondlife.com/rest/api/2/search?jql=";
-  var project = document.getElementById("project").value;
-  var status = document.getElementById("statusSelect").value;
-  var inStatusFor = document.getElementById("daysPast").value
-  var fullCallbackUrl = callbackBase;
-  fullCallbackUrl += `project=${project}+and+status=${status}+and+status+changed+to+${status}+before+-${inStatusFor}d&fields=id,status,key,assignee,summary&maxresults=100`;
-  callback(fullCallbackUrl); 
-}
-
-// Create HTML output to display the search results.
-// results.json in the "json_results" folder contains a sample of the API response
-// hint: you may run the application as well if you fix the bug. 
-function createHTMLElementResult(response) {
-
-  var issues = response.issues;
+/**
+ * @param {string} results - A list of results from a query.
+ * @param {function(result)} formatResult - called when a result needs formatting
+ */
+function renderResults(results, formatResult) {
   var list = document.createElement('ul');
-
-  for (var i = 0; i < issues.length; i++) {
-    var issue = issues[i];
-    var result = issue.key + ": " + issue.fields.summary + " - Status: " + issue.fields.status.name;
-    var item = document.createElement('li');
-    item.innerHTML = result;
-    list.appendChild(item);
+  
+  if (results) {
+    for (var i = 0; i < results.length; i++) {
+      var result = formatResult(results[i]);
+      var item = document.createElement('li');
+      item.innerHTML = result;
+      list.appendChild(item);
+    }
   }
 
-  return list.outerHTML;
-}
+  var resultDiv = document.getElementById('query-result');
+  if(list.childNodes.length > 0){
+    resultDiv.innerHTML = list.outerHTML;
+  } else {
+    setStatus('There are no activity results.');
+  }
 
-async function checkProjectExists(){
-    try {
-      return await makeRequest("https://jira.secondlife.com/rest/api/2/project/SUN", "json");
-    } catch (errorMessage) {
-      setStatus('ERROR. ' + errorMessage);
-    }
+  resultDiv.hidden = false;
+  document.getElementById('results-header').hidden = false;
 }
 
 // utility
-function domify(str){
+function buildJQL(project, status, inStatusFor) {
+  var url = "https://jira.secondlife.com/rest/api/2/search?jql=";
+  return url += `project=${project}+and+status=${status}+and+status+changed+to+${status}+before+-${inStatusFor}d&fields=id,status,key,assignee,summary&maxresults=100`;;
+}
+
+// utility
+function domify(str) {
   var dom = (new DOMParser()).parseFromString('<!doctype html><body>' + str,'text/html');
   return dom.body.textContent;
 }
@@ -114,66 +121,63 @@ function setStatus(message) {
   document.getElementById('status').hidden = false
 }
 
-// Setup
-document.addEventListener('DOMContentLoaded', function() {
-  // if logged in, setup listeners
-    checkProjectExists().then(function() {
-      //load saved options
-      loadOptions();
+// Setup for the Ticket Status Query
+function createQueryClickHandler() {
+    document.getElementById("query").onclick = function() {
+      var project = document.getElementById("project").value;
+      var status = document.getElementById("statusSelect").value;
+      var inStatusFor = document.getElementById("daysPast").value;
+      if (!project || !inStatusFor) {
+        if (!project) setStatus('ERROR. Please enter a project name.');
+        else if (!inStatusFor) setStatus('ERROR. Please set number of days.');
+        return;
+      } 
 
-      // query click handler
-      document.getElementById("query").onclick = function() {
-        // build query
-        buildJQL(function(url) {
-          setStatus('Performing JIRA search for ' + url);
+      var query = buildJQL(project, status, inStatusFor);
+      setStatus('Performing JIRA search for ' + query);
+      getQueryResults(query, function(response) {
+          setStatus('Query term: ' + query + '\n');
 
-          // perform the search
-          getQueryResults(url, function(return_val) {
-            // render the results
-            setStatus('Query term: ' + url + '\n');
-            
-            var jsonResultDiv = document.getElementById('query-result');
-            jsonResultDiv.innerHTML = return_val;
-            jsonResultDiv.hidden = false;
-
-          }, function(errorMessage) {
-              setStatus('ERROR. ' + errorMessage);
+          renderResults(response.issues, function(issue) {
+            return issue.key + ": " + issue.fields.summary 
           });
-        });
-      }
-
-      // activity feed click handler
-      document.getElementById("feed").onclick = function() {   
-        // get the xml feed
-        getJIRAFeed(function(url, xmlDoc) {
-          setStatus('Activity query: ' + url + '\n');
-
-          // render result
-          var feed = xmlDoc.getElementsByTagName('feed');
-          var entries = feed[0].getElementsByTagName("entry");
-          var list = document.createElement('ul');
-
-          for (var index = 0; index < entries.length; index++) {
-            var html = entries[index].getElementsByTagName("title")[0].innerHTML;
-            var updated = entries[index].getElementsByTagName("updated")[0].innerHTML;
-            var item = document.createElement('li');
-            item.innerHTML = new Date(updated).toLocaleString() + " - " + domify(html);
-            list.appendChild(item);
-          }
-
-          var feedResultDiv = document.getElementById('query-result');
-          if(list.childNodes.length > 0){
-            feedResultDiv.innerHTML = list.outerHTML;
-          } else {
-            setStatus('There are no activity results.');
-          }
-          
-          feedResultDiv.hidden = false;
 
         }, function(errorMessage) {
             setStatus('ERROR. ' + errorMessage);
-        });    
-      };        
+      });
+    }
+}
+
+// Setup for the JIRA Activity Query
+function createActivityFeedClickHandler() {
+    document.getElementById("feed").onclick = function() {   
+      // get the xml feed
+      getJIRAFeed(function(url, xmlDoc) {
+        setStatus('Activity query: ' + url + '\n');
+
+        // render results
+        var feed = xmlDoc.getElementsByTagName('feed');
+        renderResults(feed[0].getElementsByTagName("entry"), function(entry) {
+            var html = entry.getElementsByTagName('title')[0].innerHTML;
+            var updated = entry.getElementsByTagName('updated')[0].innerHTML;
+            return new Date(updated).toLocaleString() + " - " + domify(html); 
+        });
+      }, function(errorMessage) {
+          setStatus('ERROR. ' + errorMessage);
+      });    
+    }; 
+}
+
+// Setup
+document.addEventListener('DOMContentLoaded', function() {
+    // if logged in, setup listeners
+    checkProjectExists().then(function() {
+      
+      //load saved options
+      loadOptions();
+
+      createQueryClickHandler();
+      createActivityFeedClickHandler();
 
     }).catch(function(errorMessage) {
         setStatus('ERROR. ' + errorMessage);
